@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Crash Live - Fix</title>
+    <style>
+        body { font-family: 'Arial', sans-serif; background: #0a0a12; color: white; height: 100vh; margin: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; overflow: hidden; }
+        #multiplier { font-size: clamp(80px, 15vw, 150px); font-weight: bold; color: #4ecca3; }
+        #timer { font-size: 60px; color: #f8b400; font-weight: bold; height: 70px; }
+        .crashed { color: #e94560 !important; }
+        .status-text { font-size: 20px; text-transform: uppercase; margin-top: 20px; color: #bbb; }
+    </style>
+</head>
+<body>
+
+    <div id="multiplier">1.00x</div>
+    <div id="timer"></div>
+    <div class="status-text" id="status">Kutilmoqda...</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getDatabase, ref, onValue, set, push, remove, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyBt_YoPMKJlEL7RAGwWNx6uPJpoOHaQ2iY",
+        authDomain: "game-49172.firebaseapp.com",
+        databaseURL: "https://game-49172-default-rtdb.firebaseio.com",
+        projectId: "game-49172",
+        storageBucket: "game-49172.firebasestorage.app",
+        messagingSenderId: "695585468530",
+        appId: "1:695585468530:web:e0155f596c4778d1d412eb"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    const multDisplay = document.getElementById('multiplier');
+    const timerDisplay = document.getElementById('timer');
+    const statusDisplay = document.getElementById('status');
+
+    let gameLoop;
+
+    onValue(ref(db, 'current_game'), (snapshot) => {
+        const data = snapshot.val();
+        
+        if (!data) {
+            checkQueue();
+            return;
+        }
+
+        cancelAnimationFrame(gameLoop);
+        
+        const updateTick = () => {
+            const now = Date.now();
+            
+            if (data.status === 'waiting') {
+                const diff = Math.ceil((data.startTime + 10000 - now) / 1000);
+                
+                if (diff > 0) {
+                    multDisplay.innerText = "1.00x";
+                    multDisplay.classList.remove('crashed');
+                    timerDisplay.innerText = diff;
+                    statusDisplay.innerText = "Tayyorlaning...";
+                    gameLoop = requestAnimationFrame(updateTick);
+                } else {
+                    // Faqat bitta brauzer holatni o'zgartirishi kifoya
+                    triggerFlight(data);
+                }
+            } 
+            else if (data.status === 'flying') {
+                timerDisplay.innerText = "";
+                statusDisplay.innerText = "Parvoz!";
+                
+                const elapsed = (now - data.startTime) / 1000;
+                let currentX = Math.pow(Math.E, 0.08 * elapsed); // O'sish formulasi
+
+                if (currentX < data.targetX) {
+                    multDisplay.innerText = currentX.toFixed(2) + "x";
+                    gameLoop = requestAnimationFrame(updateTick);
+                } else {
+                    multDisplay.innerText = data.targetX.toFixed(2) + "x";
+                    multDisplay.classList.add('crashed');
+                    statusDisplay.innerText = "CRASHED!";
+                    setTimeout(resetGame, 3000); // 3 soniya natijani ko'rsatib turadi
+                }
+            }
+        };
+        gameLoop = requestAnimationFrame(updateTick);
+    });
+
+    async function checkQueue() {
+        const queueSnap = await get(ref(db, 'queue'));
+        if (queueSnap.exists()) {
+            const queueData = queueSnap.val();
+            const firstKey = Object.keys(queueData)[0];
+            const targetX = queueData[firstKey].x;
+
+            await set(ref(db, 'current_game'), {
+                status: 'waiting',
+                targetX: targetX,
+                id: firstKey,
+                startTime: Date.now()
+            });
+        } else {
+            statusDisplay.innerText = "Navbat bo'sh. Admin X kiritsin.";
+        }
+    }
+
+    async function triggerFlight(data) {
+        // Bu funksiya statusni 'waiting' dan 'flying' ga o'tkazadi
+        const snap = await get(ref(db, 'current_game'));
+        if(snap.val()?.status === 'waiting') {
+            await set(ref(db, 'current_game'), {
+                ...data,
+                status: 'flying',
+                startTime: Date.now()
+            });
+        }
+    }
+
+    async function resetGame() {
+        const snap = await get(ref(db, 'current_game'));
+        const data = snap.val();
+        if (data && data.status === 'flying') {
+            // Navbatni aylanma qilish (Loop)
+            await remove(ref(db, `queue/${data.id}`));
+            await push(ref(db, 'queue'), { x: data.targetX });
+            // O'yinni o'chirish (onValue checkQueue-ni chaqiradi)
+            await remove(ref(db, 'current_game'));
+        }
+    }
+</script>
+</body>
+</html>
